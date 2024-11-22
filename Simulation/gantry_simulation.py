@@ -1,10 +1,12 @@
-import time
+'''import time
 import csv
 from datetime import datetime, timezone, timedelta
 from unittest import mock  # Use mock for simulation
 import signal
 import sys
 import pytz
+import json
+
 
 # Mock GPIO and camera modules
 GPIO = mock.MagicMock()
@@ -182,8 +184,11 @@ def capture_image(image_id):
     print(f"Simulated image captured: {image_filename}")
     return image_filename
 
-def run_gantry_simulation(duration=10, sensor_csv='sensor_log.csv', image_csv='image_log.csv'):
+def run_gantry_simulation(duration=10, sensor_csv='/app/logs/sensor_log.csv', image_csv='/app/logs/image_log.csv'):
     """Run the gantry system and log sensor data and image data in real-time."""
+    print(f"Writing sensor data to: {sensor_csv}")
+    print(f"Writing image data to: {image_csv}")
+    
     start_time = time.time()
     image_counter = 1
 
@@ -208,12 +213,14 @@ def run_gantry_simulation(duration=10, sensor_csv='sensor_log.csv', image_csv='i
             "Soil Moisture",
             "Ultrasound Distance"
         ])
+        print("Sensor CSV headers written.")
 
         # Write headers for image data
         image_writer.writerow([
             "Timestamp",
             "Image File"
         ])
+        print("Image CSV headers written.")
 
         # Continuously collect and log data
         while time.time() - start_time < duration:
@@ -248,6 +255,7 @@ def run_gantry_simulation(duration=10, sensor_csv='sensor_log.csv', image_csv='i
 
                 # Log the sensor data with timestamp
                 log_data_to_csv(sensor_file, sensor_data_row)
+                print(f"Logged sensor data at {timestamp}")
 
                 # Prepare the image data row
                 image_data_row = [
@@ -257,8 +265,138 @@ def run_gantry_simulation(duration=10, sensor_csv='sensor_log.csv', image_csv='i
 
                 # Log the image data with timestamp
                 log_data_to_csv(image_file, image_data_row)
+                print(f"Logged image data at {timestamp}")
 
             time.sleep(0.5)  # Adjust interval to 0.5 seconds for finer data capture
+
+
+if __name__ == "__main__":
+    try:
+        run_gantry_simulation(duration=5)  # Run for 5 seconds
+    finally:
+        print("Simulation complete.")'''
+
+
+
+import time
+import csv
+from datetime import datetime
+import signal
+import sys
+import pytz
+import json
+import os
+
+# Signal handler for graceful termination
+def signal_handler(signal_received, frame):
+    print("Interrupt received! Cleaning up...")
+    sys.exit(0)
+
+# Register the signal handler for interrupt signals (e.g., Ctrl+C)
+signal.signal(signal.SIGINT, signal_handler)
+
+def get_formatted_timestamp():
+    """Get the current timestamp formatted as '8:22 AM October 25, 2024 (CDT)'."""
+    tz = pytz.timezone('America/Chicago')  # Central Time Zone
+    now = datetime.now(tz)  # Get the current time in CDT
+
+    # Use %I for the hour (12-hour clock) and strip leading zeros manually
+    hour = now.strftime("%I").lstrip("0")  # Remove leading zero if present
+    formatted_timestamp = f"{hour}:{now.strftime('%M %p %B %d, %Y (%Z)')}"
+    
+    return formatted_timestamp
+
+def read_sensor_data(sensor_file_path):
+    """Read data from a JSON file."""
+    try:
+        if os.path.exists(sensor_file_path):
+            with open(sensor_file_path, 'r') as f:
+                data = json.load(f)
+                return data
+        else:
+            raise FileNotFoundError(f"{sensor_file_path} not found.")
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Error reading sensor data: {e}")
+        return None
+
+def log_data_to_csv(file, data):
+    """Log data to CSV with precise timestamps."""
+    data = ['N/A' if d is None else d for d in data]
+    writer = csv.writer(file)
+    writer.writerow(data)
+    file.flush()
+
+def run_gantry_simulation(duration=10, sensor_csv='/app/logs/sensor_log.csv', image_csv='/app/logs/image_log.csv'):
+    """Run the gantry system and log sensor data and image data in real-time."""
+    print(f"Writing sensor data to: {sensor_csv}")
+    print(f"Writing image data to: {image_csv}")
+    
+    start_time = time.time()
+    image_counter = 1
+
+    # Paths for sensor data input from Docker container
+    sensor_files = [
+        '/app/logs/dht22_sensor_1.json',
+        '/app/logs/dht22_sensor_2.json',
+        '/app/logs/bh1750_sensor_1.json',
+        '/app/logs/bh1750_sensor_2.json',
+        '/app/logs/mlx90614_sensor.json'
+    ]
+
+    # Open the CSV files for writing
+    with open(sensor_csv, mode='w', newline='', buffering=1) as sensor_file, \
+         open(image_csv, mode='w', newline='', buffering=1) as image_file:
+
+        # Create CSV writers for each file
+        sensor_writer = csv.writer(sensor_file)
+        image_writer = csv.writer(image_file)
+
+        # Write headers for sensor data
+        sensor_writer.writerow([
+            "Timestamp",
+            "DHT22_1_Temperature", "DHT22_1_Humidity",
+            "DHT22_2_Temperature", "DHT22_2_Humidity",
+            "BH1750_1_Lux", "BH1750_2_Lux",
+            "Ambient Temp", "Object Temp",
+            "Soil Moisture",
+            "Ultrasound Distance"
+        ])
+        print("Sensor CSV headers written.")
+
+        # Write headers for image data
+        image_writer.writerow([
+            "Timestamp",
+            "Image File"
+        ])
+        print("Image CSV headers written.")
+
+        # Continuously collect and log data
+        while time.time() - start_time < duration:
+            timestamp = get_formatted_timestamp()
+            sensor_data = []
+
+            # Read data from each sensor file
+            for file_path in sensor_files:
+                data = read_sensor_data(file_path)
+                if data:
+                    sensor_data.extend(data.values())
+                else:
+                    sensor_data.extend([None] * len(data.values()))
+
+            # Log data if all sensor data is available
+            if sensor_data:
+                sensor_data_row = [timestamp] + sensor_data
+                log_data_to_csv(sensor_file, sensor_data_row)
+                print(f"Logged sensor data at {timestamp}")
+
+                # Simulate image capture
+                image_file_name = f"image_{image_counter:04d}.jpg"
+                image_data_row = [timestamp, image_file_name]
+                log_data_to_csv(image_file, image_data_row)
+                print(f"Logged image data at {timestamp}")
+                image_counter += 1
+
+            time.sleep(0.5)  # Adjust interval as needed
 
 if __name__ == "__main__":
     try:
